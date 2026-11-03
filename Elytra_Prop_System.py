@@ -1,0 +1,579 @@
+from thermoprop import *
+from fullflow import *
+import fullplot as fplt
+from ELYTRA_DATA import *
+from scipy.constants import liter, psi, pound_force
+
+
+def ElytraPropSystem(dt: float = 0.1,
+                     t_final: float = 30,
+                     filename: str = "Elytra_Prop_System.h5",
+                     chamber_map_filename: str = "Elytra_Chamber_Map.h5",
+                     lox_tank_pressure_target: fplt.Trace | None = None,
+                     fuel_tank_pressure_target: fplt.Trace | None = None,
+                     bang_bang: bool = True,
+                     switch_valves: bool = True,
+                     tank_empty_volume: float = 0.1 * liter,
+                     verbose: bool = False,
+                     statistics: bool = False):
+
+    # ---- Network ---- #
+
+    Elytra = Network("Elytra Prop System")
+
+    if lox_tank_pressure_target is None or fuel_tank_pressure_target is None:
+        raise ValueError("LOX and fuel tank pressure target traces are required.")
+
+    LOX_TANK_PRESSURE_SETPOINT = State(
+        float(lox_tank_pressure_target(0.0, bounds="clamp"))
+    )
+    FUEL_TANK_PRESSURE_SETPOINT = State(
+        float(fuel_tank_pressure_target(0.0, bounds="clamp"))
+    )
+
+    # ---- Fluids ---- #
+
+    COPVGas = Lookup(
+        "COPV Pressurant Gas",
+        Elytra,
+        Fluid,
+        "GN2",
+        pressure=PRESSURANT_INITIAL_PRESSURE,
+        temperature=PRESSURANT_INITIAL_TEMPERATURE
+    )
+
+    LOXUllageGas = Lookup(
+        "LOX Tank Ullage",
+        Elytra,
+        Fluid,
+        "GN2",
+        pressure=float(lox_tank_pressure_target(0.0, bounds="clamp")),
+        temperature=LOX_INITIAL_ULLAGE_TEMPERATURE
+    )
+
+    FuelUllageGas = Lookup(
+        "Fuel Tank Ullage",
+        Elytra,
+        Fluid,
+        "GN2",
+        pressure=float(fuel_tank_pressure_target(0.0, bounds="clamp")),
+        temperature=FUEL_INITIAL_ULLAGE_TEMPERATURE
+    )
+
+    LOXTankLiquid = Lookup(
+        "LOX Tank Liquid",
+        Elytra,
+        Fluid,
+        "LOX",
+        pressure=float(lox_tank_pressure_target(0.0, bounds="clamp")),
+        temperature=LOX_INITIAL_PROPELLANT_TEMPERATURE
+    )
+
+    FuelTankLiquid = Lookup(
+        "Fuel Tank Liquid",
+        Elytra,
+        Propellant,
+        "RP-1",
+        pressure=float(fuel_tank_pressure_target(0.0, bounds="clamp")),
+        temperature=FUEL_INITIAL_PROPELLANT_TEMPERATURE
+    )
+
+    LOXManifoldLiquid = Lookup(
+        "LOX Injector Manifold Liquid",
+        Elytra,
+        Fluid,
+        "LOX",
+        pressure=LOX_INJECTOR_MANIFOLD_PRESSURE,
+        temperature=LOX_INITIAL_PROPELLANT_TEMPERATURE
+    )
+
+    FuelManifoldLiquid = Lookup(
+        "Fuel Injector Manifold Liquid",
+        Elytra,
+        Propellant,
+        "RP-1",
+        pressure=FUEL_INJECTOR_MANIFOLD_PRESSURE,
+        temperature=FUEL_INITIAL_PROPELLANT_TEMPERATURE
+    )
+
+    # --- Sequences --- #
+
+    def TankPressureTarget(t, target_trace):
+        method = target_trace.attrs.get("method", "linear")
+        return float(target_trace(t, method=method, bounds="clamp"))
+
+    LOXTankPressureSetpoint = Sequence(
+        "LOX Tank Pressure Setpoint",
+        Elytra,
+        target=LOX_TANK_PRESSURE_SETPOINT,
+        function=TankPressureTarget,
+        inputs=[lox_tank_pressure_target],
+    )
+
+    FuelTankPressureSetpoint = Sequence(
+        "Fuel Tank Pressure Setpoint",
+        Elytra,
+        target=FUEL_TANK_PRESSURE_SETPOINT,
+        function=TankPressureTarget,
+        inputs=[fuel_tank_pressure_target],
+    )
+
+    def BangBang(t, pressure, state, set_pressure, upper_limit, lower_limit):
+        if pressure > set_pressure + upper_limit:
+            return 0.0
+        if pressure < set_pressure - lower_limit:
+            return 1.0
+        return state
+
+    if bang_bang:
+        LOX_BANG_BANG_STATE = State(0.0)
+        FUEL_BANG_BANG_STATE = State(0.0)
+
+        LOXBangBang = Sequence(
+            "LOX Bang Bang",
+            Elytra,
+            target=LOX_BANG_BANG_STATE,
+            function=BangBang,
+            inputs=[LOXUllageGas.pressure,
+                    LOX_BANG_BANG_STATE,
+                    LOX_TANK_PRESSURE_SETPOINT,
+                    LOX_BANG_BANG_UPPER_LIMIT,
+                    LOX_BANG_BANG_LOWER_LIMIT],
+        )
+
+        FuelBangBang = Sequence(
+            "Fuel Bang Bang",
+            Elytra,
+            target=FUEL_BANG_BANG_STATE,
+            function=BangBang,
+            inputs=[FuelUllageGas.pressure,
+                    FUEL_BANG_BANG_STATE,
+                    FUEL_TANK_PRESSURE_SETPOINT,
+                    FUEL_BANG_BANG_UPPER_LIMIT,
+                    FUEL_BANG_BANG_LOWER_LIMIT],
+        )
+    else:
+        LOX_BANG_BANG_STATE = State(1.0)
+        FUEL_BANG_BANG_STATE = State(1.0)
+
+    def PressureRelief(t, pressure, set_pressure):
+        if pressure > set_pressure : return 1.0
+        return 0.0
+
+    LOX_RELIEF_STATE = State(0.0)
+
+    FUEL_RELIEF_STATE = State(0.0)
+
+    LOXReliefCondition = Sequence(
+        "LOX Relief Condition",
+        Elytra,
+        target=LOX_RELIEF_STATE,
+        function=PressureRelief,
+        inputs=[LOXUllageGas.pressure,
+                LOX_RELIEF_PRESSURE]
+    )
+
+    FuelReliefCondition = Sequence(
+        "Fuel Relief Condition",
+        Elytra,
+        target=FUEL_RELIEF_STATE,
+        function=PressureRelief,
+        inputs=[FuelUllageGas.pressure,
+                FUEL_RELIEF_PRESSURE]
+    )
+
+    LOX_TANK_LIQUID_VOLUME = State(LOX_INITIAL_PROPELLANT_VOLUME)
+
+    FUEL_TANK_LIQUID_VOLUME = State(FUEL_INITIAL_PROPELLANT_VOLUME)
+    LOX_TANK_EMPTY_VOLUME = tank_empty_volume
+    FUEL_TANK_EMPTY_VOLUME = tank_empty_volume
+
+    LOXNearEmptyRedline = fplt.Trace(
+        x=[0.0, 1.0e6],
+        y=[LOX_TANK_EMPTY_VOLUME, LOX_TANK_EMPTY_VOLUME],
+        name="LOX Tank Near Empty",
+        role="redline",
+    )
+
+    FuelNearEmptyRedline = fplt.Trace(
+        x=[0.0, 1.0e6],
+        y=[FUEL_TANK_EMPTY_VOLUME, FUEL_TANK_EMPTY_VOLUME],
+        name="Fuel Tank Near Empty",
+        role="redline",
+    )
+
+    LOXTankVolumeSensor = Sensor(
+        "LOX Tank Liquid Volume",
+        Elytra,
+        reading=LOX_TANK_LIQUID_VOLUME,
+        conditions=LOXNearEmptyRedline,
+    )
+
+    FuelTankVolumeSensor = Sensor(
+        "Fuel Tank Liquid Volume",
+        Elytra,
+        reading=FUEL_TANK_LIQUID_VOLUME,
+        conditions=FuelNearEmptyRedline,
+    )
+
+    TankEmptyAbort = Sequence(
+        "Tank Near Empty Abort",
+        Elytra,
+    )
+    TankEmptyAbort.abort(
+        condition=(LOXTankVolumeSensor, "LOX Tank Near Empty"),
+        message="LOX tank reached near-empty volume.",
+    )
+    TankEmptyAbort.abort(
+        condition=(FuelTankVolumeSensor, "Fuel Tank Near Empty"),
+        message="Fuel tank reached near-empty volume.",
+    )
+
+    def HiFlowLoFlow(t, pressure, switch_pressure):
+        if pressure < switch_pressure:
+            return 1.0
+        return 0.0
+
+    LOX_HI_FLOW_STATE = State(0.0)
+    FUEL_HI_FLOW_STATE = State(0.0)
+
+    if switch_valves:
+        LOXSwitchCondition = Sequence(
+            "LOX Switch Valve Condition",
+            Elytra,
+            target=LOX_HI_FLOW_STATE,
+            function=HiFlowLoFlow,
+            inputs=[COPVGas.pressure, LOX_SWITCH_PRESSURE],
+        )
+
+        FuelSwitchCondition = Sequence(
+            "Fuel Switch Valve Condition",
+            Elytra,
+            target=FUEL_HI_FLOW_STATE,
+            function=HiFlowLoFlow,
+            inputs=[COPVGas.pressure, FUEL_SWITCH_PRESSURE],
+        )
+
+    # ---- Components ---- #
+
+    COPV = Volume(
+        "COPV",
+        Elytra,
+        pressure=COPVGas.pressure,
+        temperature=COPVGas.temperature,
+        volume=COPV_VOLUME,
+        density=COPVGas.density,
+        internal_energy=COPVGas.internal_energy,
+        enthalpy=COPVGas.enthalpy,
+        energy_variable='temperature'
+    )
+
+    LOXLo = CompressibleOrifice(
+        "LOX-Side Lo-Flow Orifice",
+        Elytra,
+        upstream_total_pressure=COPV.pressure,
+        upstream_total_temperature=COPV.temperature,
+        downstream_pressure=LOXUllageGas.pressure,
+        discharge_coefficient=LOX_BANG_BANG_STATE,
+        cross_sectional_area=LOX_LO_FLOW_ORIFICE_AREA,
+        gas_constant=COPVGas.gas_constant,
+        specific_heat_ratio=COPVGas.specific_heat_ratio,
+        upstream_static_enthalpy=COPV.enthalpy,
+        upstream_static_temperature=COPV.temperature,
+    )
+
+    FuelLo = CompressibleOrifice(
+        "Fuel-Side Lo-Flow Orifice",
+        Elytra,
+        upstream_total_pressure=COPV.pressure,
+        upstream_total_temperature=COPV.temperature,
+        downstream_pressure=FuelUllageGas.pressure,
+        discharge_coefficient=FUEL_BANG_BANG_STATE,
+        cross_sectional_area=FUEL_LO_FLOW_ORIFICE_AREA,
+        gas_constant=COPVGas.gas_constant,
+        specific_heat_ratio=COPVGas.specific_heat_ratio,
+        upstream_static_enthalpy=COPV.enthalpy,
+        upstream_static_temperature=COPV.temperature,
+    )
+
+    LOXHi = CompressibleOrifice(
+        "LOX-Side Hi-Flow Orifice",
+        Elytra,
+        upstream_total_pressure=COPV.pressure,
+        upstream_total_temperature=COPV.temperature,
+        downstream_pressure=LOXUllageGas.pressure,
+        discharge_coefficient=LOX_BANG_BANG_STATE * LOX_HI_FLOW_STATE,
+        cross_sectional_area=LOX_HI_FLOW_ORIFICE_AREA,
+        gas_constant=COPVGas.gas_constant,
+        specific_heat_ratio=COPVGas.specific_heat_ratio,
+        upstream_static_enthalpy=COPV.enthalpy,
+        upstream_static_temperature=COPV.temperature,
+    )
+
+    FuelHi = CompressibleOrifice(
+        "Fuel-Side Hi-Flow Orifice",
+        Elytra,
+        upstream_total_pressure=COPV.pressure,
+        upstream_total_temperature=COPV.temperature,
+        downstream_pressure=FuelUllageGas.pressure,
+        discharge_coefficient=FUEL_BANG_BANG_STATE * FUEL_HI_FLOW_STATE,
+        cross_sectional_area=FUEL_HI_FLOW_ORIFICE_AREA,
+        gas_constant=COPVGas.gas_constant,
+        specific_heat_ratio=COPVGas.specific_heat_ratio,
+        upstream_static_enthalpy=COPV.enthalpy,
+        upstream_static_temperature=COPV.temperature,
+    )
+
+    COPV.mass_flow_out = (LOXLo.mass_flow + FuelLo.mass_flow
+                          + LOXHi.mass_flow + FuelHi.mass_flow)
+
+    LOXTank = Volume(
+        "LOX Tank Liquid Node",
+        Elytra,
+        pressure=LOXTankLiquid.pressure,
+        volume=LOX_TANK_LIQUID_VOLUME,
+        density=LOXTankLiquid.density,
+    )
+
+    FuelTank = Volume(
+        "Fuel Tank Liquid Node",
+        Elytra,
+        pressure=FuelTankLiquid.pressure,
+        volume=FUEL_TANK_LIQUID_VOLUME,
+        density=FuelTankLiquid.density,
+    )
+
+    LOX_ULLAGE_VOLUME = LOX_TANK_VOLUME - LOXTank.volume
+    FUEL_ULLAGE_VOLUME = FUEL_TANK_VOLUME - FuelTank.volume
+    LOX_TANK_LIQUID_MASS = LOXTank.mass
+    FUEL_TANK_LIQUID_MASS = FuelTank.mass
+
+    LOX_PRESSURANT_FLOW = LOXLo.mass_flow + LOXHi.mass_flow
+    FUEL_PRESSURANT_FLOW = FuelLo.mass_flow + FuelHi.mass_flow
+    LOX_EFFECTIVE_PRESSURANT_FLOW = LOX_PRESSURANT_FLOW / LOX_COLLAPSE_FACTOR
+    FUEL_EFFECTIVE_PRESSURANT_FLOW = FUEL_PRESSURANT_FLOW / FUEL_COLLAPSE_FACTOR
+
+    LOXUllage = Volume(
+        "LOX Ullage",
+        Elytra,
+        pressure=LOXUllageGas.pressure,
+        temperature=LOXUllageGas.temperature,
+        volume=LOX_ULLAGE_VOLUME,
+        density=LOXUllageGas.density,
+        internal_energy=LOXUllageGas.internal_energy,
+        enthalpy=LOXUllageGas.enthalpy,
+        energy_variable="temperature",
+        mass_flow_in=LOX_EFFECTIVE_PRESSURANT_FLOW,
+        total_enthalpy_in=LOXLo.total_enthalpy,
+    )
+
+    FuelUllage = Volume(
+        "Fuel Ullage",
+        Elytra,
+        pressure=FuelUllageGas.pressure,
+        temperature=FuelUllageGas.temperature,
+        volume=FUEL_ULLAGE_VOLUME,
+        density=FuelUllageGas.density,
+        internal_energy=FuelUllageGas.internal_energy,
+        enthalpy=FuelUllageGas.enthalpy,
+        energy_variable="temperature",
+        mass_flow_in=FUEL_EFFECTIVE_PRESSURANT_FLOW,
+        total_enthalpy_in=FuelLo.total_enthalpy,
+    )
+
+    LOX_ULLAGE_GAS_MASS = LOXUllage.mass
+    FUEL_ULLAGE_GAS_MASS = FuelUllage.mass
+
+    LOXUllageBalance = Balance(
+        "LOX Liquid Surface Pressure Balance",
+        Elytra,
+        variable=LOXTank.volume,
+        function=LOXTank.pressure - LOXUllage.pressure,
+    )
+
+    FuelUllageBalance = Balance(
+        "Fuel Liquid Surface Pressure Balance",
+        Elytra,
+        variable=FuelTank.volume,
+        function=FuelTank.pressure - FuelUllage.pressure,
+    )
+
+    LOXRelief = CompressibleOrifice(
+        "LOX Tank Relief Valve",
+        Elytra,
+        upstream_total_pressure=LOXUllage.pressure,
+        upstream_total_temperature=LOXUllage.temperature,
+        downstream_pressure=101325,
+        discharge_coefficient=LOX_RELIEF_STATE,
+        cross_sectional_area=LOX_RELIEF_CDA,
+        gas_constant=LOXUllageGas.gas_constant,
+        specific_heat_ratio=LOXUllageGas.gamma,
+        mass_flow=LOXUllage.mass_flow_out,
+    )
+
+    FuelRelief = CompressibleOrifice(
+        "Fuel Tank Relief Valve",
+        Elytra,
+        upstream_total_pressure=FuelUllage.pressure,
+        upstream_total_temperature=FuelUllage.temperature,
+        downstream_pressure=101325,
+        discharge_coefficient=FUEL_RELIEF_STATE,
+        cross_sectional_area=FUEL_RELIEF_CDA,
+        gas_constant=FuelUllageGas.gas_constant,
+        specific_heat_ratio=FuelUllageGas.gamma,
+        mass_flow=FuelUllage.mass_flow_out,
+    )
+
+    LOXSystem = DischargeCoefficient(
+        "LOX System CdA",
+        Elytra,
+        upstream_pressure=LOXTank.pressure,
+        downstream_pressure=LOXManifoldLiquid.pressure,
+        density=LOXTankLiquid.density,
+        discharge_coefficient=1,
+        cross_sectional_area=LOX_SYSTEM_CDA,
+        mass_flow=LOXTank.mass_flow_out,
+    )
+
+    FuelSystem = DischargeCoefficient(
+        "Fuel System CdA",
+        Elytra,
+        upstream_pressure=FuelTank.pressure,
+        downstream_pressure=FuelManifoldLiquid.pressure,
+        density=FuelTankLiquid.density,
+        discharge_coefficient=1,
+        cross_sectional_area=FUEL_SYSTEM_CDA,
+        mass_flow=FuelTank.mass_flow_out,
+    )
+
+    LOXManifold = Volume(
+        "LOX Injector Manifold",
+        Elytra,
+        pressure=LOXManifoldLiquid.pressure,
+        mass_flow_in=LOXSystem.mass_flow
+    )
+
+    FuelManifold = Volume(
+        "Fuel Injector Manifold",
+        Elytra,
+        pressure=FuelManifoldLiquid.pressure,
+        mass_flow_in=FuelSystem.mass_flow
+    )
+
+    PC = State(CHAMBER_PRESSURE)
+
+    LOXInjector = DischargeCoefficient(
+        "LOX Injector CdA",
+        Elytra,
+        upstream_pressure=LOXManifold.pressure,
+        downstream_pressure=PC,
+        density=LOXManifoldLiquid.density,
+        discharge_coefficient=1,
+        cross_sectional_area=LOX_INJECTOR_CDA,
+        mass_flow=LOXManifold.mass_flow_out,
+    )
+
+    FuelInjector = DischargeCoefficient(
+        "Fuel Injector CdA",
+        Elytra,
+        upstream_pressure=FuelManifold.pressure,
+        downstream_pressure=PC,
+        density=FuelManifoldLiquid.density,
+        discharge_coefficient=1,
+        cross_sectional_area=FUEL_INJECTOR_CDA,
+        mass_flow=FuelManifold.mass_flow_out,
+    )
+    MR = LOXInjector.mass_flow / FuelInjector.mass_flow
+
+    ChamberGas = Map.from_hdf5(
+        "Combustion Chamber Gas",
+        Elytra,
+        chamber_map_filename,
+        group="chamber",
+        inputs={
+            "chamber_pressure": PC,
+            "mixture_ratio": MR,
+        },
+    )
+
+    Chamber = Volume(
+        "Combustion Chamber",
+        Elytra,
+        pressure=PC,
+        mass_flow_in=LOXInjector.mass_flow + FuelInjector.mass_flow,
+    )
+
+    Nozzle = IsentropicNozzle(
+        "Nozzle",
+        Elytra,
+        upstream_total_pressure=Chamber.pressure,
+        upstream_total_temperature=ChamberGas.temperature,
+        ambient_pressure=NOZZLE_EXIT_PRESSURE,
+        specific_heat_ratio=ChamberGas.gamma,
+        gas_constant=ChamberGas.gas_constant,
+        throat_area=THROAT_AREA,
+        expansion_ratio=EXPANSION_RATIO,
+    )
+    Chamber.mass_flow_out = Nozzle.mass_flow / CSTAR_EFFICIENCY
+    THRUST = Nozzle.mass_flow * Nozzle.exit_velocity * CF_EFFICIENCY
+
+    # ---- Tracked States ---- #
+    Elytra.track("COPV Pressure [psia]", COPV.pressure / psi)
+    Elytra.track("COPV Pressure [Pa]", COPV.pressure)
+    Elytra.track("COPV Temperature [K]", COPV.temperature)
+    Elytra.track("COPV Gas Mass [kg]", COPV.mass)
+    Elytra.track("COPV Gas Density [kg/m3]", COPV.density)
+    Elytra.track("LOX Tank Pressure [psia]", LOXUllageGas.pressure / psi)
+    Elytra.track("LOX Tank Pressure [Pa]", LOXUllageGas.pressure)
+    Elytra.track("LOX Tank Pressure Setpoint [psia]", LOX_TANK_PRESSURE_SETPOINT / psi)
+    Elytra.track("LOX Tank Pressure Setpoint [Pa]", LOX_TANK_PRESSURE_SETPOINT)
+    Elytra.track("LOX Throttle Command [psia]", LOX_TANK_PRESSURE_SETPOINT / psi)
+    Elytra.track("LOX Throttle Command [Pa]", LOX_TANK_PRESSURE_SETPOINT)
+    Elytra.track("LOX Liquid Mass [kg]", LOX_TANK_LIQUID_MASS)
+    Elytra.track("LOX Liquid Density [kg/m3]", LOXTankLiquid.density)
+    Elytra.track("LOX Liquid Volume [L]", LOX_TANK_LIQUID_VOLUME / liter)
+    Elytra.track("LOX Liquid Volume [m3]", LOX_TANK_LIQUID_VOLUME)
+    Elytra.track("LOX Ullage Gas Mass [kg]", LOX_ULLAGE_GAS_MASS)
+    Elytra.track("LOX Ullage Gas Density [kg/m3]", LOXUllageGas.density)
+    Elytra.track("LOX Ullage Temperature [K]", LOXUllageGas.temperature)
+    Elytra.track("LOX Ullage Volume [m3]", LOX_ULLAGE_VOLUME)
+    Elytra.track("LOX Pressurant Mass Flow [kg/s]", LOX_PRESSURANT_FLOW)
+    Elytra.track("LOX Bang Bang State", LOX_BANG_BANG_STATE)
+    Elytra.track("LOX Hi-Flow Switch State", LOX_HI_FLOW_STATE)
+    Elytra.track("LOX Relief Valve State", LOX_RELIEF_STATE)
+    Elytra.track("LOX Injector Mass Flow [kg/s]", LOXInjector.mass_flow)
+    Elytra.track("Fuel Tank Pressure [psia]", FuelUllageGas.pressure / psi)
+    Elytra.track("Fuel Tank Pressure [Pa]", FuelUllageGas.pressure)
+    Elytra.track("Fuel Tank Pressure Setpoint [psia]", FUEL_TANK_PRESSURE_SETPOINT / psi)
+    Elytra.track("Fuel Tank Pressure Setpoint [Pa]", FUEL_TANK_PRESSURE_SETPOINT)
+    Elytra.track("Fuel Throttle Command [psia]", FUEL_TANK_PRESSURE_SETPOINT / psi)
+    Elytra.track("Fuel Throttle Command [Pa]", FUEL_TANK_PRESSURE_SETPOINT)
+    Elytra.track("Fuel Liquid Mass [kg]", FUEL_TANK_LIQUID_MASS)
+    Elytra.track("Fuel Liquid Density [kg/m3]", FuelTankLiquid.density)
+    Elytra.track("Fuel Liquid Volume [L]", FUEL_TANK_LIQUID_VOLUME / liter)
+    Elytra.track("Fuel Liquid Volume [m3]", FUEL_TANK_LIQUID_VOLUME)
+    Elytra.track("Fuel Ullage Gas Mass [kg]", FUEL_ULLAGE_GAS_MASS)
+    Elytra.track("Fuel Ullage Gas Density [kg/m3]", FuelUllageGas.density)
+    Elytra.track("Fuel Ullage Temperature [K]", FuelUllageGas.temperature)
+    Elytra.track("Fuel Ullage Volume [m3]", FUEL_ULLAGE_VOLUME)
+    Elytra.track("Fuel Pressurant Mass Flow [kg/s]", FUEL_PRESSURANT_FLOW)
+    Elytra.track("Fuel Bang Bang State", FUEL_BANG_BANG_STATE)
+    Elytra.track("Fuel Hi-Flow Switch State", FUEL_HI_FLOW_STATE)
+    Elytra.track("Fuel Relief Valve State", FUEL_RELIEF_STATE)
+    Elytra.track("Fuel Injector Mass Flow [kg/s]", FuelInjector.mass_flow)
+    Elytra.track("Mixture Ratio", MR)
+    Elytra.track("Chamber Pressure [psia]", Chamber.pressure / psi)
+    Elytra.track("Chamber Pressure [Pa]", Chamber.pressure)
+    Elytra.track("Chamber Temperature [K]", ChamberGas.temperature)
+    Elytra.track("Nozzle Mass Flow [kg/s]", Nozzle.mass_flow)
+    Elytra.track("Thrust [lbf]", THRUST / pound_force)
+    Elytra.track("Thrust [N]", THRUST)
+
+    # ---- Solver ---- #
+    Transient(Elytra).solve(
+        dt=dt,
+        t_final=t_final,
+        filename=filename,
+        verbose=verbose,
+        statistics=statistics,
+    )
