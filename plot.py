@@ -1,9 +1,10 @@
+from pathlib import Path
 from scipy.constants import *
 import fullplot as fplt
 
-flight_filename = "Elytra/Elytra_6DOF_Results.h5"
+flight_filename = str(Path(__file__).resolve().parent / "Elytra_6DOF_Results.h5")
 flight_group    = "flight"
-prop_filename   = "Elytra/Elytra_Prop_System.h5"
+prop_filename   = str(Path(__file__).resolve().parent / "Elytra_Prop_System.h5")
 prop_group      = "Elytra_Prop_System/transient/runs/base/tracks"
 
 

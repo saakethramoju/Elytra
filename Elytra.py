@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import thermoprop
 import ussa1976
@@ -20,7 +21,7 @@ from Elytra_Canted_Flight import CantedThrustFlight
 from Elytra_Drag_Curves.Build_Elytra_Drag import build as BuildElytraDragCurves
 
 
-ELYTRA_DIRECTORY = "Elytra"
+ELYTRA_DIRECTORY = str(Path(__file__).resolve().parent)
 
 
 
@@ -51,9 +52,9 @@ CD_POWER_OFF                = f"{DRAG_CURVE_DIRECTORY}/Drag_Power_Off.csv"
 
 
 # ---- Prop System Settings ---- #
-PROP_GENERATE_CHAMBER_MAP   = True
+PROP_GENERATE_CHAMBER_MAP   = False
 PROP_CHAMBER_MAP_FILENAME   = f"{ELYTRA_DIRECTORY}/Elytra_Chamber_Map.h5"
-PROP_SOLVE_PROP_SYSTEM      = True
+PROP_SOLVE_PROP_SYSTEM      = False
 PROP_FILENAME               = f"{ELYTRA_DIRECTORY}/Elytra_Prop_System.h5"
 PROP_GENERATE_CURVES        = True
 PROP_CURVE_DIRECTORY        = f"{ELYTRA_DIRECTORY}/Elytra_Prop_Curves"
@@ -106,7 +107,7 @@ if GENERATE_DRAG_CURVES:
 
 
 # ---- Prop System ---- #
-if PROP_GENERATE_CHAMBER_MAP:
+if PROP_GENERATE_CHAMBER_MAP or not Path(PROP_CHAMBER_MAP_FILENAME).is_file():
 
     print("Generating chamber Pc/MR map...")
 
@@ -119,7 +120,7 @@ if PROP_GENERATE_CHAMBER_MAP:
 
 
 
-if PROP_SOLVE_PROP_SYSTEM:
+if PROP_SOLVE_PROP_SYSTEM or not Path(PROP_FILENAME).is_file():
 
     print("Solving propulsion system...")
 

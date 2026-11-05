@@ -1,5 +1,6 @@
 import re
 import warnings
+from pathlib import Path
 import h5py
 import numpy as np
 from rocketpy import Function
@@ -111,10 +112,12 @@ def ExportRocketPyCurves(filename, output_directory="Elytra_Prop_Curves", tank_e
         "fuel_tank_pressure":"Fuel Tank Pressure (Pa)",
         "fuel_ullage_temperature":"Fuel Ullage Temperature (K)",
     }
+    output_directory = Path(output_directory)
+    output_directory.mkdir(parents=True, exist_ok=True)
     for stem, label in headers.items():
         data = np.column_stack((export_time, raw[stem]))
         output_name = "_".join(word.capitalize() for word in stem.split("_"))
-        np.savetxt(f"{output_directory}/{output_name}.csv", data, delimiter=",",
+        np.savetxt(output_directory / f"{output_name}.csv", data, delimiter=",",
                    header=f"Time (s),{label}", comments="", fmt="%.10g")
     print(f"RocketPy propulsion curves exported through {cutoff:.4f} s")
     return cutoff

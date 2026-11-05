@@ -1,0 +1,14 @@
+# Generated data and externally supplied aerodynamic decks
+*.h5
+*.hdf5
+Elytra_Prop_Curves/
+Elytra_Drag_Curves/*.csv
+Elytra_Drag_Curves/Drag_Curve_Metadata.json
+
+# Python and local environment files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+*.tmp
