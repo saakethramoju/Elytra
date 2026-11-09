@@ -14,7 +14,6 @@ from rocketpy import (
     Flight
 )
 from Elytra_Prop_System import ElytraPropSystem
-from Elytra_Chamber_Map import ElytraChamberMap
 from Elytra_Export import ExportRocketPyCurves, ExportFlightResults
 from ELYTRA_DATA import *
 from Elytra_Canted_Flight import CantedThrustFlight
@@ -22,7 +21,6 @@ from Elytra_Drag_Curves.Build_Elytra_Drag import build as BuildElytraDragCurves
 
 
 ELYTRA_DIRECTORY = str(Path(__file__).resolve().parent)
-
 
 
 # ---- Flight Sim Settings ---- #
@@ -52,9 +50,8 @@ CD_POWER_OFF                = f"{DRAG_CURVE_DIRECTORY}/Drag_Power_Off.csv"
 
 
 # ---- Prop System Settings ---- #
-PROP_GENERATE_CHAMBER_MAP   = False
-PROP_CHAMBER_MAP_FILENAME   = f"{ELYTRA_DIRECTORY}/Elytra_Chamber_Map.h5"
-PROP_SOLVE_PROP_SYSTEM      = False
+PROP_MAP_FILENAME           = f"{ELYTRA_DIRECTORY}/VEHICLE_MAPS.h5"
+PROP_SOLVE_PROP_SYSTEM      = True
 PROP_FILENAME               = f"{ELYTRA_DIRECTORY}/Elytra_Prop_System.h5"
 PROP_GENERATE_CURVES        = True
 PROP_CURVE_DIRECTORY        = f"{ELYTRA_DIRECTORY}/Elytra_Prop_Curves"
@@ -89,7 +86,6 @@ PROP_FUEL_TANK_PRESSURE_TARGET = fplt.Trace(
 )
 
 
-
 # ---- Aerodynamic Curves ---- #
 if GENERATE_DRAG_CURVES:
 
@@ -104,22 +100,7 @@ if GENERATE_DRAG_CURVES:
     )
 
 
-
-
 # ---- Prop System ---- #
-if PROP_GENERATE_CHAMBER_MAP or not Path(PROP_CHAMBER_MAP_FILENAME).is_file():
-
-    print("Generating chamber Pc/MR map...")
-
-    ElytraChamberMap(
-        filename=PROP_CHAMBER_MAP_FILENAME,
-        fuel_temperature=FUEL_INITIAL_PROPELLANT_TEMPERATURE,
-        lox_temperature=LOX_INITIAL_PROPELLANT_TEMPERATURE,
-    )
-
-
-
-
 if PROP_SOLVE_PROP_SYSTEM or not Path(PROP_FILENAME).is_file():
 
     print("Solving propulsion system...")
@@ -128,7 +109,7 @@ if PROP_SOLVE_PROP_SYSTEM or not Path(PROP_FILENAME).is_file():
         dt=PROP_DT,
         t_final=PROP_T_FINAL,
         filename=PROP_FILENAME,
-        chamber_map_filename=PROP_CHAMBER_MAP_FILENAME,
+        property_map_filename=PROP_MAP_FILENAME,
         lox_tank_pressure_target=PROP_LOX_TANK_PRESSURE_TARGET,
         fuel_tank_pressure_target=PROP_FUEL_TANK_PRESSURE_TARGET,
         bang_bang=PROP_BANG_BANG,
@@ -137,8 +118,6 @@ if PROP_SOLVE_PROP_SYSTEM or not Path(PROP_FILENAME).is_file():
         verbose=PROP_VERBOSE,
         statistics=PROP_STATISTICS,
     )
-
-
 
 
 if PROP_GENERATE_CURVES:
@@ -150,8 +129,6 @@ if PROP_GENERATE_CURVES:
         output_directory=PROP_CURVE_DIRECTORY,
         tank_empty_volume=PROP_TANK_EMPTY_VOLUME,
     )
-
-
 
 
 # ---- Launch Conditions ---- #
@@ -329,11 +306,6 @@ ElytraEngine.add_tank(
 )
 
 
-
-
-
-
-
 # ---- Rocket Definition ---- #
 
 Elytra = Rocket(
@@ -374,11 +346,6 @@ Elytra.add_trapezoidal_fins(
     sweep_length=FIN_SWEEP_LENGTH,
     cant_angle=FIN_CANT_ANGLE,
 )
-
-
-
-
-
 
 
 # ---- Flight Simulation ---- #

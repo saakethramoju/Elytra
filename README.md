@@ -27,18 +27,22 @@ python MapGenerator.py
 python Elytra.py
 ```
 
-`MapGenerator.py` generates `VEHICLE_MAPS.h5`, including the pressurant,
-oxygen, and fuel property groups consumed by the propulsion solver. Its
-chamber group is separate from Elytra's temperature-specific chamber map.
-`Elytra.py` generates `Elytra_Chamber_Map.h5` when missing (or when
-`PROP_GENERATE_CHAMBER_MAP` is enabled), builds drag CSVs from the external
-decks, solves propulsion when its HDF5 output is missing (or when
-`PROP_SOLVE_PROP_SYSTEM` is enabled), exports propulsion CSVs, and runs/exports the flight.
-The current local throttle commands, simulation settings, and tank geometry
-are retained. Edit the settings near the top of `Elytra.py` and the
-vehicle constants in `ELYTRA_DATA.py` as needed. Regenerate the chamber map
-when changing its propellant temperatures or grid settings. Enable
-`PROP_SOLVE_PROP_SYSTEM` after changing propulsion inputs to refresh existing results.
+`MapGenerator.py` generates one `VEHICLE_MAPS.h5` file containing the chamber,
+pressurant, oxygen, and fuel property groups used by the propulsion solver.
+Chamber propellant temperatures come from `ELYTRA_DATA.py`. Regenerate the
+maps after changing those temperatures, fluid selections, or grid settings.
+
+`Elytra.py` builds drag CSVs when `GENERATE_DRAG_CURVES` is enabled, solves
+propulsion when its HDF5 output is missing or `PROP_SOLVE_PROP_SYSTEM` is
+enabled, exports propulsion CSVs when `PROP_GENERATE_CURVES` is enabled,
+and runs the flight when `RUN_FLIGHT` is enabled. Flight results are exported
+when `EXPORT_RESULTS` is also enabled.
+
+Edit the settings near the top of `Elytra.py` and the vehicle constants in
+`ELYTRA_DATA.py` as needed. `PROP_MAP_FILENAME` selects the shared property
+map file; set it to `None` for direct thermodynamics. Enable
+`PROP_SOLVE_PROP_SYSTEM` after changing propulsion inputs to refresh existing
+results. Export propulsion curves before running a flight.
 
 Generated outputs include `Elytra_Prop_System.h5`, `Elytra_6DOF_Results.h5`,
 `Elytra_Prop_Curves/`, and the drag CSVs/metadata. All HDF5 files, generated

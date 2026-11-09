@@ -1,4 +1,4 @@
-"""Generate the chamber and fluid-property maps used by Vehicle.py.
+"""Generate the chamber and fluid-property maps used by Elytra_Prop_System.py.
 
 Each enabled map is written to a separate group in FILENAME. Regenerating one
 map replaces only that group; other groups in the HDF5 file are preserved.
@@ -8,6 +8,10 @@ from pathlib import Path
 from scipy.constants import psi
 import fullplot as fplt
 from thermoprop import Fluid, Propellant, Reactants, Equilibrium
+from ELYTRA_DATA import (
+    LOX_INITIAL_PROPELLANT_TEMPERATURE,
+    FUEL_INITIAL_PROPELLANT_TEMPERATURE,
+)
 
 
 # ---- Maps to Generate ---- #
@@ -38,8 +42,8 @@ MIXTURE_RATIO_MIN = 0.5
 MIXTURE_RATIO_MAX = 4.0
 MIXTURE_RATIO_POINTS = 36
 
-LOX_TEMPERATURE = 100.0
-FUEL_TEMPERATURE = 298.15
+LOX_TEMPERATURE = LOX_INITIAL_PROPELLANT_TEMPERATURE
+FUEL_TEMPERATURE = FUEL_INITIAL_PROPELLANT_TEMPERATURE
 
 # ---- Pressurant (GN2) Map Settings ---- #
 PRESSURANT_PRESSURE_MIN = 10.0 * psi
@@ -123,9 +127,6 @@ def GenerateMap(group, axes, outputs, evaluate):
         overwrite=True,
         raise_errors=True,
     )
-
-
-
 
 
 if __name__ == "__main__":
